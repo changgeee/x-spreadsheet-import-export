@@ -205,12 +205,20 @@
               //   ]
               // }
               const { left, right, top, bottom } = cell.style.border;
-              let bd = {
-                top: _.isArray(top) ? top : [top.style, argb2hex(top.color.argb)],
-                bottom: _.isArray(bottom) ? bottom : [bottom.style, argb2hex(bottom.color.argb)],
-                left: _.isArray(left) ? left : [left.style, argb2hex(left.color.argb)],
-                right: _.isArray(right) ? right : [right.style, argb2hex(right.color.argb)]
+              let bd = {};
+              if (top) {
+                bd.top = _.isArray(top) ? top : [top.style||"thin", argb2hex(top.color?.argb||"FF000000")];
               }
+              if (bottom) {
+                bd.bottom = _.isArray(bottom) ? bottom : [bottom.style||"thin", argb2hex(bottom.color?.argb||"FF000000")];
+              }
+              if (left) {
+                bd.left = _.isArray(left) ? left : [left.style||"thin", argb2hex(left.color?.argb||"FF000000")];
+              }
+              if (right) {
+                bd.right = _.isArray(right) ? right : [right.style||"thin", argb2hex(right.color?.argb||"FF000000")];
+              }
+
               cell.style.border = bd;
             }
             //处理合并单元格
