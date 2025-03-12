@@ -1,6 +1,10 @@
 # x-spreadsheet-import-export
 xspreadsheet的导入导出demo，基于excelJs，保留样式
 
+在线体验(https://changgeee.github.io/x-spreadsheet-import-export/)
+
+效果图:
+<img src="./screenshot/a01.png" alt="demo" width="600" height="400">
 
 - 用x-spreadsheet开发时需要用到导入导出功能，查了一堆只找到sheetJs的demo(```https://docs.sheetjs.com/docs/demos/grid/xs```),在线体验（```https://docs.sheetjs.com/xspreadsheet/```）；
 
