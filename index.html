@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <meta name="robots" content="noindex" />
+  <title>excelJS + x-spreadsheet 导入导出 Demo</title>
+  <style>
+    #drop {
+      border: 2px dashed #bbb;
+      -moz-border-radius: 5px;
+      -webkit-border-radius: 5px;
+      border-radius: 5px;
+      padding: 25px;
+      text-align: center;
+      font: 20pt bold, "Vollkorn";
+      color: #bbb
+    }
+
+    #b64data {
+      width: 100%;
+    }
+
+    a {
+      text-decoration: none
+    }
+  </style>
+  <!-- x-spreadsheet stylesheet -->
+  <link rel="stylesheet" href="https://unpkg.com/x-data-spreadsheet/dist/xspreadsheet.css" />
+</head>
+
+<body>
+  <pre>
+<b><a href="https://github.com/changgeee/x-spreadsheet-import-export">ExcelJS + x-spreadsheet 导入导出 Demo</a></b>
+
+<div id="drop">Drop a xlsx file here to see sheet data</div>
+<input type="file" name="xlfile" id="xlf" /> ... or click here to select a file
+<textarea id="b64data">... or paste a base64-encoding here</textarea>
+</pre>
+  <p><input type="submit" value="Export to XLSX!" id="xport" onclick="export_xlsx();"></p>
+  <div id="htmlout"></div>
+  <br />
+  <script src="https://unpkg.com/x-data-spreadsheet/dist/xspreadsheet.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/shim.min.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.sheetjs.com/xspreadsheet/xlsxspread.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-polyfill/6.26.0/polyfill.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tinycolor/1.6.0/tinycolor.min.js"></script>
+  <script>
+
+
+    var HTMLOUT = document.getElementById('htmlout');
+    var xspr = x_spreadsheet(HTMLOUT);
+    HTMLOUT.style.height = (window.innerHeight - 400) + "px";
+    HTMLOUT.style.width = (window.innerWidth - 50) + "px";
+
+    var argb2hex = function (val) {
+      val = val.trim().toLowerCase();
+      var color = {};
+      try {
+        var argb = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(val)
+        color.r = parseInt(argb[2], 16);
+        color.g = parseInt(argb[3], 16);
+        color.b = parseInt(argb[4], 16);
+        color.a = parseInt(argb[1], 16) / 255;
+        return tinycolor(`rgba(${color.r}, ${color.g}, ${color.b}, ${color.a})`).toHexString()
+      } catch (e) {
+        console.log(e)
+      }
+    }
+
+    var hex2argb = function (val) {
+      var rgb = tinycolor(val).toRgb()
+      var rHex = parseInt(rgb.r).toString(16).padStart(2, '0')
+      var gHex = parseInt(rgb.g).toString(16).padStart(2, '0')
+      var bHex = parseInt(rgb.b).toString(16).padStart(2, '0')
+      var aHex = parseInt(rgb.a).toString(16).padStart(2, '0')
+      var res = aHex + rHex + gHex + bHex
+      return res;
+    }
+
+    var e2x = function (wb) {
+      let workbookData = [];
+      wb.eachSheet((sheet, sheetIndex) => {
+        // 构造x-data-spreadsheet 的 sheet 数据源结构
+        let sheetData = { name: sheet.name, styles: [], rows: {}, merges: [] }
+        // 收集合并单元格信息
+        let mergeAddressData = []
+        for (let mergeRange in sheet._merges) {
+          sheetData.merges.push(sheet._merges[mergeRange].shortRange)
+          let mergeAddress = {}
+          // 合并单元格起始地址
+          mergeAddress.startAddress = sheet._merges[mergeRange].tl
+          // 合并单元格终止地址
+          mergeAddress.endAddress = sheet._merges[mergeRange].br
+          // Y轴方向跨度
+          mergeAddress.YRange = sheet._merges[mergeRange].model.bottom - sheet._merges[mergeRange].model.top
+          // X轴方向跨度
+          mergeAddress.XRange = sheet._merges[mergeRange].model.right - sheet._merges[mergeRange].model.left
+          mergeAddressData.push(mergeAddress)
+        }
+        sheetData.cols = {}
+        for (let i = 0; i < sheet.columns.length; i++) {
+          sheetData.cols[i.toString()] = {}
+          if (sheet.columns[i].width) {
+            // 不知道为什么从 exceljs 读取的宽度显示到 x-data-spreadsheet 特别小, 这里乘以8
+            sheetData.cols[i.toString()].width = sheet.columns[i].width * 8
+          } else {
+            // 默认列宽
+            sheetData.cols[i.toString()].width = 100
+          }
+        }
+
+        // 遍历行
+        sheet.eachRow((row, rowIndex) => {
+          sheetData.rows[(rowIndex - 1).toString()] = { cells: {} }
+          if (row.height) {
+            sheetData.rows[(rowIndex - 1).toString()].height = row.height * 1.5;
+          }
+          row.eachCell({ includeEmpty: true }, function (cell, colNumber) {
+            let cellText = ''
+            if (cell.value && cell.value.result) {
+              // Excel 单元格有公式
+              cellText = cell.value.result
+            } else if (cell.value && cell.value.richText) {
+              // Excel 单元格是多行文本
+              for (let text in cell.value.richText) {
+                // 多行文本做累加
+                cellText += cell.value.richText[text].text
+              }
+            }
+            else {
+              // Excel 单元格无公式
+              cellText = cell.value
+            }
+
+            // 背景色
+            let backGroundColor = null
+            if (cell.style.fill && cell.style.fill.fgColor && cell.style.fill.fgColor.argb) {
+              backGroundColor = argb2hex(cell.style.fill.fgColor.argb)
+            }
+
+            if (backGroundColor) {
+              cell.style.bgcolor = backGroundColor
+            }
+            // 字体颜色
+            let fontColor = null
+            if (cell.style.font && cell.style.font.color && cell.style.font.color.argb) {
+              fontColor = argb2hex(cell.style.font.color.argb)
+            }
+            if (fontColor) {
+              //console.log(fontColor)
+              cell.style.color = fontColor
+            }
+
+            // 对齐 
+            if (cell.style.alignment && cell.style.alignment.horizontal) {
+              cell.style.align = cell.style.alignment.horizontal
+              cell.style.valign = cell.style.alignment.vertical || "middle";
+            }
+            if (cell.style.border) {
+              // excel border
+              // {
+              //   "left": {
+              //       "style": "thin",
+              //       "color": {
+              //           "argb": "FF000000"
+              //       }
+              //   },
+              //   "right": {
+              //       "style": "thin",
+              //       "color": {
+              //           "argb": "FF000000"
+              //       }
+              //   },
+              //   "top": {
+              //       "style": "thin",
+              //       "color": {
+              //           "argb": "FF000000"
+              //       }
+              //   },
+              //   "bottom": {
+              //       "style": "thin",
+              //       "color": {
+              //           "argb": "FF000000"
+              //       }
+              //   }
+              // }
+
+              // xs border
+              // {
+              //   "bottom": [
+              //       "thin",
+              //       "#000"
+              //   ],
+              //   "top": [
+              //       "thin",
+              //       "#000"
+              //   ],
+              //   "left": [
+              //       "thin",
+              //       "#000"
+              //   ],
+              //   "right": [
+              //       "thin",
+              //       "#000"
+              //   ]
+              // }
+              const { left, right, top, bottom } = cell.style.border;
+              let bd = {
+                top: _.isArray(top) ? top : [top.style, argb2hex(top.color.argb)],
+                bottom: _.isArray(bottom) ? bottom : [bottom.style, argb2hex(bottom.color.argb)],
+                left: _.isArray(left) ? left : [left.style, argb2hex(left.color.argb)],
+                right: _.isArray(right) ? right : [right.style, argb2hex(right.color.argb)]
+              }
+              cell.style.border = bd;
+            }
+            //处理合并单元格
+            let mergeAddress = _.find(mergeAddressData, function (o) { return o.startAddress == cell._address })
+            if (mergeAddress) {
+              // 遍历的单元格属于合并单元格
+              if (cell.master.address != mergeAddress.startAddress) {
+                // 不是合并单元格中的第一个单元格不需要计入数据源
+                return
+              }
+              // 说明是合并单元格区域的起始单元格
+              sheetData.rows[(rowIndex - 1).toString()].cells[(colNumber - 1).toString()] = { text: cellText, style: 0, merge: [mergeAddress.YRange, mergeAddress.XRange] }
+              sheetData.styles.push(cell.style)
+              //对应的style存放序号
+              sheetData.rows[(rowIndex - 1).toString()].cells[(colNumber - 1).toString()].style = sheetData.styles.length - 1
+            }
+            else {
+              // 非合并单元格
+              sheetData.rows[(rowIndex - 1).toString()].cells[(colNumber - 1).toString()] = { text: cellText, style: 0 }
+              //解析单元格,包含样式
+              sheetData.styles.push(cell.style)
+              //对应的style存放序号
+              sheetData.rows[(rowIndex - 1).toString()].cells[(colNumber - 1).toString()].style = sheetData.styles.length - 1
+            }
+          });
+        })
+        workbookData.push(sheetData)
+      })
+      return workbookData;
+    };
+
+    var process_wb = (function () {
+      var XPORT = document.getElementById('xport');
+      return function process_wb(wb) {
+        /* 转换exceljs数据为x-spreadsheet数据格式 */
+        var data = e2x(wb);
+        /* update x-spreadsheet */
+        xspr.loadData(data);
+        XPORT.disabled = false;
+        if (typeof console !== 'undefined') console.log("output", new Date());
+      };
+    })();
+
+
+
+    var do_file = (function () {
+      return function do_file(files) {
+        var f = files[0];
+        var reader = new FileReader();
+        reader.onload = function (e) {
+          if (typeof console !== 'undefined') console.log("onload", new Date());
+          var data = new Uint8Array(e.target?.result);
+          const wb = new ExcelJS.Workbook();
+          wb.xlsx.load(data).then(() => {
+            process_wb(wb);
+          })
+        };
+        reader.readAsArrayBuffer(f);
+      };
+    })();
+
+    (function () {
+      var drop = document.getElementById('drop');
+      if (!drop.addEventListener) return;
+
+      function handleDrop(e) {
+        e.stopPropagation();
+        e.preventDefault();
+        do_file(e.dataTransfer.files);
+      }
+
+      function handleDragover(e) {
+        e.stopPropagation();
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }
+
+      drop.addEventListener('dragenter', handleDragover, false);
+      drop.addEventListener('dragover', handleDragover, false);
+      drop.addEventListener('drop', handleDrop, false);
+    })();
+
+    (function () {
+      var xlf = document.getElementById('xlf');
+      if (!xlf.addEventListener) return;
+      function handleFile(e) { do_file(e.target.files); }
+      xlf.addEventListener('change', handleFile, false);
+    })();
+
+    (function () {
+      try {
+        fetch("https://docs.sheetjs.com/pres.numbers")
+          .then(function (res) { return res.arrayBuffer(); })
+          .then(function (ab) { process_wb(XLSX.read(ab)); });
+      } catch (e) { }
+    })();
+
+    function export_xlsx() {
+      var new_wb = xtos(xspr.getData());
+
+      /* write file and trigger a download */
+      XLSX.writeFile(new_wb, 'SheetJSXSpreadsheetExport.xlsx', {});
+    }
+  </script>
+  <script type="text/javascript">
+    /* eslint no-use-before-define:0 */
+    var _gaq = _gaq || [];
+    _gaq.push(['_setAccount', 'UA-36810333-1']);
+    _gaq.push(['_trackPageview']);
+
+    (function () {
+      var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
+      ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+      var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
+    })();
+  </script>
+  <!-- Cloudflare Pages Analytics -->
+  <script defer src='https://static.cloudflareinsights.com/beacon.min.js'
+    data-cf-beacon='{"token": "5045fe4c2b784ddb8c3c6ee7fa0593e5"}'></script><!-- Cloudflare Pages Analytics -->
+</body>
+
+</html>
