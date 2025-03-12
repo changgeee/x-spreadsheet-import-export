@@ -41,9 +41,6 @@
   <div id="htmlout"></div>
   <br />
   <script src="https://unpkg.com/x-data-spreadsheet/dist/xspreadsheet.js"></script>
-  <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/shim.min.js"></script>
-  <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
-  <script src="https://cdn.sheetjs.com/xspreadsheet/xlsxspread.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-polyfill/6.26.0/polyfill.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
@@ -105,7 +102,6 @@
         for (let i = 0; i < sheet.columns.length; i++) {
           sheetData.cols[i.toString()] = {}
           if (sheet.columns[i].width) {
-            // 不知道为什么从 exceljs 读取的宽度显示到 x-data-spreadsheet 特别小, 这里乘以8
             sheetData.cols[i.toString()].width = sheet.columns[i].width * 8
           } else {
             // 默认列宽
@@ -304,19 +300,110 @@
       xlf.addEventListener('change', handleFile, false);
     })();
 
-    (function () {
-      try {
-        fetch("https://docs.sheetjs.com/pres.numbers")
-          .then(function (res) { return res.arrayBuffer(); })
-          .then(function (ab) { process_wb(XLSX.read(ab)); });
-      } catch (e) { }
-    })();
 
     function export_xlsx() {
-      var new_wb = xtos(xspr.getData());
+      var xsData = xspr.getData();
+      const exceljsWorkbook = new ExcelJS.Workbook();
+      exceljsWorkbook.modified = new Date();
+      xsData.forEach(function (xws) {
+        let rowobj = xws.rows;
+        // 构造exceljs文档结构
+        const exceljsSheet = exceljsWorkbook.addWorksheet(xws.name)
+        // 读取列宽
+        let sheetColumns = []
+        let colIndex = 0
+        for (let col in xws.cols) {
+          if (xws.cols[col].width) {
+            sheetColumns.push({ header: colIndex + '', key: colIndex + '', width: xws.cols[col].width / 8 })
+          }
+          colIndex++
+        }
+        exceljsSheet.columns = sheetColumns
+        for (let ri = 0; ri < rowobj.len; ++ri) {
+          let row = rowobj[ri];
+          if (!row) continue;
+          const exceljsRow = exceljsSheet.getRow(ri + 1)
+          Object.keys(row.cells).forEach(function (k) {
+            let idx = +k;
+            if (isNaN(idx)) return;
+            const exceljsCell = exceljsRow.getCell(Number(k) + 1)
+            exceljsCell.value = row.cells[k].text
+            // 对齐方式
+            if (xws.styles[row.cells[k].style] && xws.styles[row.cells[k].style].alignment) {
+              if (xws.styles[row.cells[k].style].alignment.vertical) {
+                if (!exceljsCell.alignment) {
+                  exceljsCell.alignment = {}
+                }
+                exceljsCell.alignment.vertical = xws.styles[row.cells[k].style].alignment.vertical
+              }
+              if (xws.styles[row.cells[k].style].alignment.horizontal) {
+                if (!exceljsCell.alignment) {
+                  exceljsCell.alignment = {}
+                }
+                exceljsCell.alignment.horizontal = xws.styles[row.cells[k].style].alignment.horizontal
+              }
+            }
 
-      /* write file and trigger a download */
-      XLSX.writeFile(new_wb, 'SheetJSXSpreadsheetExport.xlsx', {});
+            // 边框
+            if (xws.styles[row.cells[k].style].border) {
+              exceljsCell.border = {};
+              const { left, right, top, bottom } = xws.styles[row.cells[k].style].border;
+              if (left && left.length === 2) {
+                exceljsCell.border.left = { style: left[0], color: { argb: hex2argb(left[1]) } }
+              }
+              if (right && right.length === 2) {
+                exceljsCell.border.right = { style: right[0], color: { argb: hex2argb(right[1]) } }
+              }
+              if (top && top.length === 2) {
+                exceljsCell.border.top = { style: top[0], color: { argb: hex2argb(top[1]) } }
+              }
+              if (bottom && bottom.length === 2) {
+                exceljsCell.border.bottom = { style: bottom[0], color: { argb: hex2argb(bottom[1]) } }
+              }
+            }
+            // 背景色
+            if (xws.styles[row.cells[k].style].bgcolor) {
+              var _bgColor = hex2argb(xws.styles[row.cells[k].style].bgcolor)
+              // 设置exceljs背景色
+              exceljsCell.fill = {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { argb: _bgColor }
+              }
+            }
+            // 字体
+            exceljsCell.font = xws.styles[row.cells[k].style].font
+            // 字体颜色
+            if (xws.styles[row.cells[k].style].color) {
+              exceljsCell.font.color = { argb: hex2argb(xws.styles[row.cells[k].style].color) }
+            }
+            // 合并单元格
+            if (row.cells[k].merge) {
+              // 开始行
+              let startRow = ri + 1
+              // 结束行,加上Y轴跨度
+              let endRow = startRow + row.cells[k].merge[0]
+              // 开始列
+              let startColumn = Number(k) + 1
+              // 结束列,加上X轴跨度
+              let endColumn = startColumn + row.cells[k].merge[1]
+              // 按开始行，开始列，结束行，结束列合并
+              exceljsSheet.mergeCells(startRow, startColumn, endRow, endColumn);
+            }
+          });
+        }
+      });
+      // writeBuffer 把写好的excel 转换成 ArrayBuffer 类型
+      exceljsWorkbook.xlsx.writeBuffer().then((data) => {
+        const link = document.createElement('a');
+        // Blob 实现下载excel
+        const blob = new Blob([data], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8',
+        });
+        link.href = window.URL.createObjectURL(blob);
+        link.download = 'export_xlsx.xlsx';
+        link.click();
+      });
     }
   </script>
   <script type="text/javascript">
